@@ -27,7 +27,7 @@ export function CanvasNodeContextMenu({ menu, onClose, onDuplicate, onDelete }: 
             style={{ left: menu.x, top: menu.y, background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onPointerDown={(event) => event.stopPropagation()}
         >
-            <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} />
+            {menu.type === "node" ? <MenuButton icon={<Plus className="size-4" />} label="Duplicate" onClick={onDuplicate} /> : null}
             <MenuButton icon={<Trash2 className="size-4" />} label="Delete" onClick={onDelete} danger />
         </div>
     );
