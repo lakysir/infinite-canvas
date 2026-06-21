@@ -30,6 +30,56 @@ export function getDataUrlByteSize(dataUrl: string) {
     return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
+const DEFAULT_MAX_IMAGE_BYTES = 500 * 1024;
+const MIN_COMPRESS_QUALITY = 0.45;
+const COMPRESS_QUALITY_STEP = 0.08;
+const COMPRESS_SCALE_STEP = 0.86;
+
+export async function compressDataUrlToBase64(dataUrl: string, maxBytes = DEFAULT_MAX_IMAGE_BYTES) {
+    if (getDataUrlByteSize(dataUrl) <= maxBytes) return dataUrlBase64(dataUrl);
+
+    const image = await loadImage(dataUrl);
+    let width = image.naturalWidth || image.width || 1024;
+    let height = image.naturalHeight || image.height || 1024;
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("鍘嬬缉鍥剧墖澶辫触");
+
+    for (let scaleAttempt = 0; scaleAttempt < 10; scaleAttempt += 1) {
+        canvas.width = Math.max(1, Math.round(width));
+        canvas.height = Math.max(1, Math.round(height));
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        for (let quality = 0.9; quality >= MIN_COMPRESS_QUALITY; quality -= COMPRESS_QUALITY_STEP) {
+            const compressed = canvas.toDataURL("image/jpeg", quality);
+            if (getDataUrlByteSize(compressed) <= maxBytes) return dataUrlBase64(compressed);
+        }
+
+        width *= COMPRESS_SCALE_STEP;
+        height *= COMPRESS_SCALE_STEP;
+    }
+
+    const finalDataUrl = canvas.toDataURL("image/jpeg", MIN_COMPRESS_QUALITY);
+    if (getDataUrlByteSize(finalDataUrl) > maxBytes) throw new Error("鍥剧墖鍘嬬缉鍚庝粛瓒呰繃 500KB锛岃鎹㈢敤鏇村皬鐨勫弬鑰冨浘");
+    return dataUrlBase64(finalDataUrl);
+}
+
+export function dataUrlBase64(dataUrl: string) {
+    const base64 = dataUrl.split(",", 2)[1];
+    if (!base64) throw new Error("鍥剧墖 base64 鏁版嵁鏃犳晥");
+    return base64;
+}
+
+function loadImage(dataUrl: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("璇诲彇鍥剧墖澶辫触"));
+        image.src = dataUrl;
+    });
+}
+
 export function readFileAsDataUrl(file: File) {
     return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
