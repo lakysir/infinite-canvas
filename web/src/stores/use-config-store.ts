@@ -60,8 +60,8 @@ export type WebdavSyncConfig = {
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
-const OPENAI_BASE_URL = "https://api.openai.com";
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const OPENAI_BASE_URL = "https://api.newtoken.club";
+const GEMINI_BASE_URL = "https://api.newtoken.club";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
