@@ -1,6 +1,7 @@
 "use client";
 
 import type { WebdavSyncConfig } from "@/stores/use-config-store";
+import { useConfigStore } from "@/stores/use-config-store";
 
 export const WEBDAV_MANIFEST_FILE_NAME = "manifest.json";
 const WEBDAV_REQUEST_TIMEOUT_MS = 120000;
@@ -74,7 +75,10 @@ async function webdavDirectoryExists(config: WebdavSyncConfig, path: string) {
 
 async function webdavFetch(config: WebdavSyncConfig, path: string, init: RequestInit) {
     const headers = new Headers(init.headers);
-    if (config.username || config.password) headers.set("Authorization", `Basic ${encodeBasicAuth(`${config.username}:${config.password}`)}`);
+    const apiKey = useConfigStore.getState().config.mirrmartApiKey.trim();
+    if (apiKey && isMirrmartWebdavUrl(config.url)) headers.set("Authorization", `Bearer ${apiKey}`);
+    else if (config.username || config.password) headers.set("Authorization", `Basic ${encodeBasicAuth(`${config.username}:${config.password}`)}`);
+    else if (apiKey) headers.set("Authorization", `Bearer ${apiKey}`);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), WEBDAV_REQUEST_TIMEOUT_MS);
     try {
@@ -125,6 +129,15 @@ function buildWebdavUrl(config: WebdavSyncConfig, path: string) {
 
 function normalizePath(path: string) {
     return path.trim().replace(/^\/+|\/+$/g, "");
+}
+
+function isMirrmartWebdavUrl(url: string) {
+    try {
+        const parsed = new URL(url.trim());
+        return parsed.hostname === "www.aimh8.com" && parsed.pathname.includes("/openapi/fpbrowser2api/v1/webdav");
+    } catch {
+        return false;
+    }
 }
 
 function assertWebdavConfig(config: WebdavSyncConfig) {

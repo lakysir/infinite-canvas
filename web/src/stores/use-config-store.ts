@@ -106,7 +106,7 @@ export const defaultConfig: AiConfig = {
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     proxyMode: "direct",
-    url: "",
+    url: "https://www.aimh8.com/agent/openapi/fpbrowser2api/v1/webdav",
     username: "",
     password: "",
     directory: "infinite-canvas",
@@ -217,7 +217,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
+                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav, url: persistedWebdav.url || defaultWebdavSyncConfig.url },
                     config: {
                         ...config,
                         channelMode: "local",

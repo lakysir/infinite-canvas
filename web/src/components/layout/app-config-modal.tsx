@@ -336,13 +336,6 @@ export function AppConfigModal() {
                         children: (
                             <Form layout="vertical" requiredMark={false}>
                                 <div className="grid gap-4 md:grid-cols-4">
-                                    <Form.Item label="Mirrmart API Key" className="mb-4 md:col-span-4">
-                                        <Input.Password
-                                            value={config.mirrmartApiKey}
-                                            placeholder="用于上传参考图片和视频到 Mirrmart"
-                                            onChange={(event) => updateConfig("mirrmartApiKey", event.target.value)}
-                                        />
-                                    </Form.Item>
                                     <Form.Item label="画布默认生图张数" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。" className="mb-4">
                                         <Input
                                             type="number"
@@ -397,6 +390,13 @@ export function AppConfigModal() {
                                         <div className="text-xs text-stone-500">{webdav.lastSyncedAt ? `上次同步 ${formatWebdavTime(webdav.lastSyncedAt)}` : "尚未同步"}</div>
                                     </div>
                                     <div className="grid gap-4 md:grid-cols-2">
+                                        <Form.Item label="Mirrmart API Key" extra="访问 aimh8.com 的内置 WebDAV 时会作为 Bearer Token 使用；用户名和密码可留空。" className="mb-4 md:col-span-2">
+                                            <Input.Password
+                                                value={config.mirrmartApiKey}
+                                                placeholder="用于同步画布，也用于上传参考图片和视频到 Mirrmart"
+                                                onChange={(event) => updateConfig("mirrmartApiKey", event.target.value)}
+                                            />
+                                        </Form.Item>
                                         <Form.Item label="连接方式" className="mb-4 md:col-span-2">
                                             <Segmented
                                                 block
