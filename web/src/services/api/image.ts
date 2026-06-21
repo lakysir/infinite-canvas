@@ -697,7 +697,6 @@ function buildAsyncImagePayload(config: AiConfig, prompt: string, images: string
     const payload: Record<string, unknown> = {
         model,
         prompt,
-        seconds: "4",
     };
     const aspectRatio = resolveAsyncImageAspectRatio(config.size);
     if (aspectRatio) payload.aspect_ratio = aspectRatio;
