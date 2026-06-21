@@ -12,7 +12,6 @@ export type ModelChannel = {
     name: string;
     baseUrl: string;
     apiKey: string;
-    mirrmartApiKey: string;
     apiFormat: ApiCallFormat;
     models: string[];
 };
@@ -21,6 +20,7 @@ export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
+    mirrmartApiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
     model: string;
@@ -116,6 +116,7 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
 type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
+    hydrated: boolean;
     isConfigOpen: boolean;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
@@ -124,6 +125,7 @@ type ConfigStore = {
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
     setConfigDialogOpen: (isOpen: boolean) => void;
     clearPromptContinue: () => void;
+    setHydrated: (hydrated: boolean) => void;
 };
 
 function isVideoModelName(model: string) {
@@ -176,6 +178,7 @@ export const useConfigStore = create<ConfigStore>()(
         (set, get) => ({
             config: defaultConfig,
             webdav: defaultWebdavSyncConfig,
+            hydrated: false,
             isConfigOpen: false,
             shouldPromptContinue: false,
             updateConfig: (key, value) =>
@@ -196,10 +199,14 @@ export const useConfigStore = create<ConfigStore>()(
             openConfigDialog: (shouldPromptContinue = false) => set({ isConfigOpen: true, shouldPromptContinue }),
             setConfigDialogOpen: (isConfigOpen) => set({ isConfigOpen }),
             clearPromptContinue: () => set({ shouldPromptContinue: false }),
+            setHydrated: (hydrated) => set({ hydrated }),
         }),
         {
             name: CONFIG_STORE_KEY,
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
+            onRehydrateStorage: () => (state) => {
+                state?.setHydrated(true);
+            },
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;

@@ -33,6 +33,7 @@ type CanvasNodePromptPanelProps = {
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = defaultMode(node.type);
     const config = buildNodeConfig(globalConfig, node, mode);
@@ -49,6 +50,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const updatePrompt = (value: string) => {
         setPrompt(value);
         if (!isEditingExistingContent) onPromptChange(node.id, value);
+    };
+
+    const updateNodeConfig = (patch: Partial<CanvasNodeData["metadata"]>) => {
+        onConfigChange(node.id, patch);
+        persistGenerationOptions(mode, patch, updateConfig);
     };
 
     const submit = () => {
@@ -81,20 +87,20 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     <CanvasPromptLibrary onSelect={updatePrompt} />
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => updateNodeConfig({ model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
-                                onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
+                                onConfigChange={(key, value) => updateNodeConfig(key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
                                 onMissingConfig={() => openConfigDialog(true)}
                                 onOpenChange={onImageSettingsOpenChange}
                             />
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
-                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => updateNodeConfig({ model })} capability="video" onMissingConfig={() => openConfigDialog(true)} />
+                            <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => updateNodeConfig(videoConfigPatch(key, value))} />
                         </>
                     ) : mode === "audio" ? (
                         <>
@@ -171,6 +177,29 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     if (key === "videoGenerateAudio") return { generateAudio: value };
     if (key === "videoWatermark") return { watermark: value };
     return { [key]: value };
+}
+
+function persistGenerationOptions(
+    mode: CanvasNodeGenerationMode,
+    patch: Partial<CanvasNodeData["metadata"]>,
+    updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void,
+) {
+    if (mode !== "image" && mode !== "video") return;
+    if (typeof patch.model === "string") updateConfig(mode === "image" ? "imageModel" : "videoModel", patch.model);
+    if (typeof patch.size === "string") updateConfig("size", patch.size);
+    if (mode === "image") {
+        if (typeof patch.quality === "string") updateConfig("quality", patch.quality);
+        if (patch.count !== undefined) {
+            const count = String(Math.max(1, Math.min(15, Math.floor(Math.abs(Number(patch.count)) || 1))));
+            updateConfig("count", count);
+            updateConfig("canvasImageCount", count);
+        }
+        return;
+    }
+    if (typeof patch.seconds === "string") updateConfig("videoSeconds", patch.seconds);
+    if (typeof patch.vquality === "string") updateConfig("vquality", patch.vquality);
+    if (typeof patch.generateAudio === "string") updateConfig("videoGenerateAudio", patch.generateAudio);
+    if (typeof patch.watermark === "string") updateConfig("videoWatermark", patch.watermark);
 }
 
 function audioConfigPatch(key: CanvasAudioSettingKey, value: string) {

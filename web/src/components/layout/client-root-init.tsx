@@ -11,6 +11,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const handledConfigParams = useRef(false);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const config = useConfigStore((state) => state.config);
+    const hydrated = useConfigStore((state) => state.hydrated);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
 
     useEffect(() => {
@@ -51,5 +52,23 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         message.success("已导入本地直连配置");
     }, [config.channels, message, openConfigDialog, updateConfig]);
 
+    useEffect(() => {
+        if (!hydrated || handledConfigParams.current) return;
+        if (config.mirrmartApiKey.trim()) return;
+        const mainUrl = resolveMainDomainUrl();
+        if (!mainUrl) return;
+        window.location.replace(mainUrl);
+    }, [config.mirrmartApiKey, hydrated]);
+
     return <>{children}</>;
+}
+
+function resolveMainDomainUrl() {
+    if (typeof window === "undefined") return "";
+    const { hostname, protocol } = window.location;
+    if (!hostname || hostname === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return "";
+    const parts = hostname.split(".").filter(Boolean);
+    if (parts.length < 3 || parts[0].toLowerCase() === "www") return "";
+    const rootHost = parts.slice(1).join(".");
+    return `${protocol}//www.${rootHost}/`;
 }
