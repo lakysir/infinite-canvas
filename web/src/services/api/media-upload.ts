@@ -38,12 +38,7 @@ export async function uploadReferenceMedia(config: AiConfig, file: Blob, type: U
 export function resolveMirrmartOpenApiBaseUrl() {
     const envBase = process.env.NEXT_PUBLIC_MIRRMART_OPENAPI_BASE_URL?.trim();
     if (envBase) return envBase.replace(/\/+$/, "");
-    if (typeof window === "undefined") return DEFAULT_MIRRMART_OPENAPI_BASE_URL;
-    const hostname = window.location.hostname;
-    if (!hostname || hostname === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) return DEFAULT_MIRRMART_OPENAPI_BASE_URL;
-    const parts = hostname.split(".").filter(Boolean);
-    const rootHost = parts.length >= 3 ? parts.slice(1).join(".") : hostname;
-    return `https://www.${rootHost}/agent/openapi/fpbrowser2api`;
+    return DEFAULT_MIRRMART_OPENAPI_BASE_URL;
 }
 
 function defaultFilename(type: UploadMediaType, mimeType: string) {
