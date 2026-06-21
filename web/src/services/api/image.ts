@@ -2,8 +2,9 @@ import axios from "axios";
 
 import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
-import { compressDataUrlForApi } from "@/lib/image-utils";
+import { compressDataUrlForApi, dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { uploadReferenceMedia } from "@/services/api/media-upload";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
 
@@ -579,7 +580,7 @@ async function requestGeminiImages(config: AiConfig, prompt: string, references:
 async function requestGeminiImagesOnce(config: AiConfig, prompt: string, references: ReferenceImage[], options?: RequestOptions) {
     const parts: GeminiPart[] = [{ text: prompt }];
     for (const image of references) {
-        parts.push(toGeminiImagePart(await imageToDataUrl(image)));
+        parts.push(toGeminiImagePart(await resolveReferenceImageUrl(config, image, options)));
     }
     const response = await axios.post<GeminiPayload>(
         geminiApiUrl(config, "generateContent"),
@@ -659,8 +660,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
-    const images = await Promise.all(references.map(async (image) => compressDataUrlForApi(await imageToDataUrl(image))));
-    const maskImage = mask ? await compressDataUrlForApi(await imageToDataUrl(mask)) : undefined;
+    const images = await Promise.all(references.map((image) => resolveReferenceImageUrl(requestConfig, image, options)));
+    const maskImage = mask ? await resolveReferenceImageUrl(requestConfig, mask, options) : undefined;
 
     try {
         const response = await axios.post<ImageApiResponse>(
@@ -757,3 +758,14 @@ const defaultGeminiConfig: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat" | "
     model: "",
     systemPrompt: "",
 };
+
+async function resolveReferenceImageUrl(config: AiConfig, image: ReferenceImage, options?: RequestOptions) {
+    const directUrl = image.url || image.dataUrl;
+    if (isPublicMediaUrl(directUrl)) return directUrl;
+    const dataUrl = await compressDataUrlForApi(await imageToDataUrl(image));
+    return uploadReferenceMedia(config, dataUrlToFile({ ...image, dataUrl }), "image", image.name || "reference.png", options?.signal);
+}
+
+function isPublicMediaUrl(value: string | undefined) {
+    return /^https?:\/\//i.test(value || "");
+}

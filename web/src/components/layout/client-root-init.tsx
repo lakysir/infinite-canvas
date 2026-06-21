@@ -18,12 +18,16 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         const searchParams = new URLSearchParams(window.location.search);
         const baseUrl = searchParams.get("baseUrl") || searchParams.get("baseurl");
         const apiKey = searchParams.get("apiKey") || searchParams.get("apikey");
-        if (!baseUrl && !apiKey) return;
+        const mirrmartApiKey = searchParams.get("mirrmartApiKey") || searchParams.get("mirrmart_apikey") || searchParams.get("mirrmartApikey");
+        if (!baseUrl && !apiKey && !mirrmartApiKey) return;
         handledConfigParams.current = true;
         searchParams.delete("baseUrl");
         searchParams.delete("baseurl");
         searchParams.delete("apiKey");
         searchParams.delete("apikey");
+        searchParams.delete("mirrmartApiKey");
+        searchParams.delete("mirrmart_apikey");
+        searchParams.delete("mirrmartApikey");
         window.history.replaceState(null, "", `${window.location.pathname}${searchParams.size ? `?${searchParams}` : ""}${window.location.hash}`);
         const firstChannel = config.channels[0];
         updateConfig(
@@ -42,6 +46,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         );
         if (baseUrl) updateConfig("baseUrl", baseUrl);
         if (apiKey) updateConfig("apiKey", apiKey);
+        if (mirrmartApiKey) updateConfig("mirrmartApiKey", mirrmartApiKey);
         openConfigDialog(false);
         message.success("已导入本地直连配置");
     }, [config.channels, message, openConfigDialog, updateConfig]);

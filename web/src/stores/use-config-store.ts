@@ -12,6 +12,7 @@ export type ModelChannel = {
     name: string;
     baseUrl: string;
     apiKey: string;
+    mirrmartApiKey: string;
     apiFormat: ApiCallFormat;
     models: string[];
 };
@@ -66,6 +67,7 @@ export const defaultConfig: AiConfig = {
     channelMode: "local",
     baseUrl: OPENAI_BASE_URL,
     apiKey: "",
+    mirrmartApiKey: "",
     apiFormat: "openai",
     channels: [
         {
@@ -212,6 +214,7 @@ export const useConfigStore = create<ConfigStore>()(
                     config: {
                         ...config,
                         channelMode: "local",
+                        mirrmartApiKey: config.mirrmartApiKey || "",
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
                         models,

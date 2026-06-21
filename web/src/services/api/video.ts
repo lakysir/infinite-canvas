@@ -2,6 +2,7 @@ import axios from "axios";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
+import { uploadReferenceMedia } from "@/services/api/media-upload";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
@@ -96,17 +97,18 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
-    const body = new FormData();
-    body.append("model", modelOptionName(model));
-    body.append("prompt", prompt);
-    body.append("seconds", normalizeVideoSeconds(config.videoSeconds));
-    if (normalizeVideoSize(config.size)) body.append("size", normalizeVideoSize(config.size)!);
-    body.append("resolution_name", normalizeVideoResolution(config.vquality));
-    body.append("preset", "normal");
-    const files = await Promise.all(references.slice(0, 7).map(async (image) => dataUrlToFile({ ...image, dataUrl: await imageToDataUrl(image) })));
-    files.forEach((file) => body.append("input_reference[]", file));
+    const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveUploadedImageUrl(config, image)));
+    const body = {
+        model: modelOptionName(model),
+        prompt,
+        seconds: normalizeVideoSeconds(config.videoSeconds),
+        ...(normalizeVideoSize(config.size) ? { size: normalizeVideoSize(config.size) } : {}),
+        resolution_name: normalizeVideoResolution(config.vquality),
+        preset: "normal",
+        ...(imageUrls.length ? { input_reference: imageUrls } : {}),
+    };
     try {
-        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config), signal: options?.signal })).data);
+        const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
         if (!created.id) throw new Error("Video task id is missing");
         return { id: created.id, provider: "openai", model };
     } catch (error) {
@@ -232,7 +234,7 @@ async function buildSeedanceContent(config: AiConfig, prompt: string, references
         content.push({ type: "image_url", image_url: { url: await resolveSeedanceImageUrl(config, image) }, role: "reference_image" });
     }
     for (const video of videoReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.videos)) {
-        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(video) }, role: "reference_video" });
+        content.push({ type: "video_url", video_url: { url: await resolveSeedanceVideoUrl(config, video) }, role: "reference_video" });
     }
     for (const audio of audioReferences.slice(0, SEEDANCE_REFERENCE_LIMITS.audios)) {
         content.push({ type: "audio_url", audio_url: { url: await resolveSeedanceAudioUrl(audio) }, role: "reference_audio" });
@@ -241,20 +243,24 @@ async function buildSeedanceContent(config: AiConfig, prompt: string, references
 }
 
 async function resolveSeedanceImageUrl(config: AiConfig, image: ReferenceImage) {
+    return resolveUploadedImageUrl(config, image);
+}
+
+async function resolveUploadedImageUrl(config: AiConfig, image: ReferenceImage) {
     const directUrl = image.url || image.dataUrl;
     if (isPublicMediaUrl(directUrl) || directUrl.startsWith("asset://")) return directUrl;
     const dataUrl = await imageToDataUrl(image);
     if (!dataUrl) throw new Error("Failed to read reference image");
-    return dataUrl;
+    return uploadReferenceMedia(config, dataUrlToFile({ ...image, dataUrl }), "image", image.name || "reference.png");
 }
 
-async function resolveSeedanceVideoUrl(video: ReferenceVideo) {
+async function resolveSeedanceVideoUrl(config: AiConfig, video: ReferenceVideo) {
     if (isPublicMediaUrl(video.url) || video.url.startsWith("asset://")) return video.url;
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
     if (!blob) throw new Error("Reference video must be a public URL, asset id, or locally stored video");
-    return blobToDataUrl(blob);
+    return uploadReferenceMedia(config, blob, "video", video.name || "reference.mp4");
 }
 
 async function resolveSeedanceAudioUrl(audio: ReferenceAudio) {
@@ -317,7 +323,7 @@ async function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt
     };
     const aspectRatio = normalizeNewTokenAspectRatio(config.size);
     if (aspectRatio) payload.aspect_ratio = aspectRatio;
-    const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveNewTokenImageUrl(image)));
+    const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveNewTokenImageUrl(config, image)));
     if (imageUrls.length) {
         if (normalizedModelName === "veo-omni-flash-video-edit") {
             payload.Ingredients_images = imageUrls;
@@ -327,7 +333,7 @@ async function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt
             payload.extra_images = imageUrls;
         }
     }
-    const videoUrls = await Promise.all(videoReferences.map((video) => resolveNewTokenVideoUrl(video)));
+    const videoUrls = await Promise.all(videoReferences.map((video) => resolveNewTokenVideoUrl(config, video)));
     if (videoUrls.length) payload.extra_videos = videoUrls;
     const audioUrls = await Promise.all(audioReferences.map((audio) => resolveNewTokenAudioUrl(audio)));
     if (audioUrls.length) payload.extra_audios = audioUrls;
@@ -355,19 +361,20 @@ function normalizeNewTokenAspectRatio(value: string) {
     return /^\d+:\d+$/.test(size) ? size : undefined;
 }
 
-async function resolveNewTokenImageUrl(image: ReferenceImage) {
+async function resolveNewTokenImageUrl(config: AiConfig, image: ReferenceImage) {
     const directUrl = image.url || image.dataUrl;
-    if (isPublicMediaUrl(directUrl) || directUrl.startsWith("data:image/") || directUrl.startsWith("asset://")) return directUrl;
-    return imageToDataUrl(image);
+    if (isPublicMediaUrl(directUrl) || directUrl.startsWith("asset://")) return directUrl;
+    const dataUrl = await imageToDataUrl(image);
+    return uploadReferenceMedia(config, dataUrlToFile({ ...image, dataUrl }), "image", image.name || "reference.png");
 }
 
-async function resolveNewTokenVideoUrl(video: ReferenceVideo) {
-    if (isPublicMediaUrl(video.url) || video.url.startsWith("data:video/") || video.url.startsWith("asset://")) return video.url;
+async function resolveNewTokenVideoUrl(config: AiConfig, video: ReferenceVideo) {
+    if (isPublicMediaUrl(video.url) || video.url.startsWith("asset://")) return video.url;
     let blob: Blob | null = null;
     if (video.storageKey) blob = await getMediaBlob(video.storageKey);
     if (!blob && video.url?.startsWith("blob:")) blob = await (await fetch(video.url)).blob();
     if (!blob) throw new Error("NewToken video reference must be a public URL or local stored video");
-    return blobToDataUrl(blob);
+    return uploadReferenceMedia(config, blob, "video", video.name || "reference.mp4");
 }
 
 async function resolveNewTokenAudioUrl(audio: ReferenceAudio) {
