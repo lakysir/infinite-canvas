@@ -317,6 +317,18 @@ function isNewTokenVideoModel(model: string) {
 async function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], audioReferences: ReferenceAudio[]) {
     const modelName = modelOptionName(model).trim();
     const normalizedModelName = modelName.toLowerCase();
+    const isVeoEdit = isVeoOmniFlashVideoEditModel(normalizedModelName);
+    const isVeo = isVeoModel(normalizedModelName);
+    const isVideoSeries = isVideoSeriesModel(normalizedModelName);
+    if (videoReferences.length) {
+        if (isVeoEdit && videoReferences.length > 1) throw new Error("veo-omni-flash-video-edit supports only one reference video");
+        if (isVeo && !isVeoEdit) throw new Error(`${modelName} does not support reference video. Use veo-omni-flash-video-edit or a video-* model.`);
+        if (isVideoSeries && videoReferences.length > 3) throw new Error(`${modelName} supports up to 3 reference videos`);
+    }
+    if (audioReferences.length) {
+        if (!isVideoSeries) throw new Error(`${modelName} does not support reference audio. Use a video-* model.`);
+        if (audioReferences.length > 3) throw new Error(`${modelName} supports up to 3 reference audios`);
+    }
     const payload: Record<string, unknown> = {
         model: modelName,
         prompt,
@@ -326,19 +338,42 @@ async function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt
     if (aspectRatio) payload.aspect_ratio = aspectRatio;
     const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveNewTokenImageUrl(config, image)));
     if (imageUrls.length) {
-        if (normalizedModelName === "veo-omni-flash-video-edit") {
+        if (isVeoEdit) {
             payload.Ingredients_images = imageUrls;
-        } else if (normalizedModelName.startsWith("veo-")) {
+        } else if (isVeo) {
             payload.images = imageUrls;
+        } else if (isVideoSeries) {
+            payload.image_url = imageUrls[0];
+            if (imageUrls.length > 1) payload.extra_images = imageUrls.slice(1);
         } else {
             payload.extra_images = imageUrls;
         }
     }
     const videoUrls = await Promise.all(videoReferences.map((video) => resolveNewTokenVideoUrl(config, video)));
-    if (videoUrls.length) payload.extra_videos = videoUrls;
-    const audioUrls = await Promise.all(audioReferences.map((audio) => resolveNewTokenAudioUrl(audio)));
-    if (audioUrls.length) payload.extra_audios = audioUrls;
+    if (videoUrls.length) {
+        if (isVeoEdit) {
+            payload.video_url = videoUrls[0];
+        } else if (isVideoSeries) {
+            payload.extra_videos = videoUrls;
+        }
+    }
+    const audioUrls = await Promise.all(audioReferences.map((audio) => resolveNewTokenAudioUrl(config, audio)));
+    if (audioUrls.length) {
+        payload.extra_audios = audioUrls;
+    }
     return payload;
+}
+
+function isVeoOmniFlashVideoEditModel(modelName: string) {
+    return modelName === "veo-omni-flash-video-edit";
+}
+
+function isVeoModel(modelName: string) {
+    return modelName.startsWith("veo-");
+}
+
+function isVideoSeriesModel(modelName: string) {
+    return modelName.startsWith("video-");
 }
 
 function normalizeNewTokenSeconds(model: string, value: string) {
@@ -378,13 +413,13 @@ async function resolveNewTokenVideoUrl(config: AiConfig, video: ReferenceVideo) 
     return uploadReferenceMedia(config, blob, "video", video.name || "reference.mp4");
 }
 
-async function resolveNewTokenAudioUrl(audio: ReferenceAudio) {
-    if (isPublicMediaUrl(audio.url) || audio.url.startsWith("data:audio/") || audio.url.startsWith("asset://")) return audio.url;
+async function resolveNewTokenAudioUrl(config: AiConfig, audio: ReferenceAudio) {
+    if (isPublicMediaUrl(audio.url) || audio.url.startsWith("asset://")) return audio.url;
     let blob: Blob | null = null;
     if (audio.storageKey) blob = await getMediaBlob(audio.storageKey);
-    if (!blob && audio.url?.startsWith("blob:")) blob = await (await fetch(audio.url)).blob();
+    if (!blob && (audio.url?.startsWith("blob:") || audio.url?.startsWith("data:audio/"))) blob = await (await fetch(audio.url)).blob();
     if (!blob) throw new Error("NewToken audio reference must be a public URL or local stored audio");
-    return blobToDataUrl(blob);
+    return uploadReferenceMedia(config, blob, "audio", audio.name || "reference.mp3");
 }
 
 function extractVideoUrl(video: VideoResponse) {

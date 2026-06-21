@@ -2,12 +2,13 @@ import axios from "axios";
 
 import type { AiConfig } from "@/stores/use-config-store";
 
-type UploadMediaType = "image" | "video";
+type UploadMediaType = "image" | "video" | "audio";
 type UploadMediaResponse = {
     success?: boolean;
     url?: string;
     image_url?: string;
     video_url?: string;
+    audio_url?: string;
     error?: string;
     msg?: string;
 };
@@ -18,8 +19,8 @@ const DEFAULT_MIRRMART_OPENAPI_BASE_URL = "https://www.aimh8.com/agent/openapi/f
 export async function uploadReferenceMedia(config: AiConfig, file: Blob, type: UploadMediaType, filename?: string, signal?: AbortSignal) {
     const apiKey = config.mirrmartApiKey.trim();
     if (!apiKey) throw new Error("Please configure Mirrmart API Key first");
-    const maxBytes = type === "image" ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
-    if (file.size > maxBytes) throw new Error(`${type === "image" ? "Image" : "Video"} reference is too large`);
+    const maxBytes = type === "image" ? 10 * 1024 * 1024 : type === "video" ? 50 * 1024 * 1024 : 15 * 1024 * 1024;
+    if (file.size > maxBytes) throw new Error(`${type === "image" ? "Image" : type === "video" ? "Video" : "Audio"} reference is too large`);
 
     const form = new FormData();
     form.append("file", file, filename || defaultFilename(type, file.type));
@@ -30,7 +31,7 @@ export async function uploadReferenceMedia(config: AiConfig, file: Blob, type: U
         signal,
         timeout: 180000,
     });
-    const url = response.data.url || response.data.video_url || response.data.image_url;
+    const url = response.data.url || response.data.video_url || response.data.image_url || response.data.audio_url;
     if (!url) throw new Error(response.data.error || response.data.msg || "Media upload did not return a URL");
     return url;
 }
@@ -42,7 +43,7 @@ export function resolveMirrmartOpenApiBaseUrl() {
 }
 
 function defaultFilename(type: UploadMediaType, mimeType: string) {
-    const ext = mimeTypeToExt(mimeType) || (type === "image" ? "png" : "mp4");
+    const ext = mimeTypeToExt(mimeType) || (type === "image" ? "png" : type === "video" ? "mp4" : "mp3");
     return `reference-${Date.now()}.${ext}`;
 }
 
@@ -55,5 +56,10 @@ function mimeTypeToExt(mimeType: string) {
     if (value === "video/mp4") return "mp4";
     if (value === "video/webm") return "webm";
     if (value === "video/quicktime") return "mov";
+    if (value === "audio/mpeg" || value === "audio/mp3") return "mp3";
+    if (value === "audio/wav" || value === "audio/x-wav") return "wav";
+    if (value === "audio/aac") return "aac";
+    if (value === "audio/ogg") return "ogg";
+    if (value === "audio/opus") return "opus";
     return "";
 }
