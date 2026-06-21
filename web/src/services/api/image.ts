@@ -2,7 +2,7 @@ import axios from "axios";
 
 import { buildApiUrl, resolveModelRequestConfig, type AiConfig, type ModelChannel } from "@/stores/use-config-store";
 import { nanoid } from "nanoid";
-import { compressDataUrlToBase64 } from "@/lib/image-utils";
+import { compressDataUrlForApi } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -659,8 +659,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
-    const images = await Promise.all(references.map(async (image) => compressDataUrlToBase64(await imageToDataUrl(image))));
-    const maskImage = mask ? await compressDataUrlToBase64(await imageToDataUrl(mask)) : undefined;
+    const images = await Promise.all(references.map(async (image) => compressDataUrlForApi(await imageToDataUrl(image))));
+    const maskImage = mask ? await compressDataUrlForApi(await imageToDataUrl(mask)) : undefined;
 
     try {
         const response = await axios.post<ImageApiResponse>(

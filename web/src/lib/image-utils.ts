@@ -35,8 +35,8 @@ const MIN_COMPRESS_QUALITY = 0.45;
 const COMPRESS_QUALITY_STEP = 0.08;
 const COMPRESS_SCALE_STEP = 0.86;
 
-export async function compressDataUrlToBase64(dataUrl: string, maxBytes = DEFAULT_MAX_IMAGE_BYTES) {
-    if (getDataUrlByteSize(dataUrl) <= maxBytes) return dataUrlBase64(dataUrl);
+export async function compressDataUrlForApi(dataUrl: string, maxBytes = DEFAULT_MAX_IMAGE_BYTES) {
+    if (getDataUrlByteSize(dataUrl) <= maxBytes) return dataUrl;
 
     const image = await loadImage(dataUrl);
     let width = image.naturalWidth || image.width || 1024;
@@ -53,7 +53,7 @@ export async function compressDataUrlToBase64(dataUrl: string, maxBytes = DEFAUL
 
         for (let quality = 0.9; quality >= MIN_COMPRESS_QUALITY; quality -= COMPRESS_QUALITY_STEP) {
             const compressed = canvas.toDataURL("image/jpeg", quality);
-            if (getDataUrlByteSize(compressed) <= maxBytes) return dataUrlBase64(compressed);
+            if (getDataUrlByteSize(compressed) <= maxBytes) return compressed;
         }
 
         width *= COMPRESS_SCALE_STEP;
@@ -62,13 +62,7 @@ export async function compressDataUrlToBase64(dataUrl: string, maxBytes = DEFAUL
 
     const finalDataUrl = canvas.toDataURL("image/jpeg", MIN_COMPRESS_QUALITY);
     if (getDataUrlByteSize(finalDataUrl) > maxBytes) throw new Error("鍥剧墖鍘嬬缉鍚庝粛瓒呰繃 500KB锛岃鎹㈢敤鏇村皬鐨勫弬鑰冨浘");
-    return dataUrlBase64(finalDataUrl);
-}
-
-export function dataUrlBase64(dataUrl: string) {
-    const base64 = dataUrl.split(",", 2)[1];
-    if (!base64) throw new Error("鍥剧墖 base64 鏁版嵁鏃犳晥");
-    return base64;
+    return finalDataUrl;
 }
 
 function loadImage(dataUrl: string) {
