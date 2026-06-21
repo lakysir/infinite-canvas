@@ -73,6 +73,20 @@ type ImageApiResponse = {
     code?: number;
     msg?: string;
 };
+type AsyncImageTaskResponse = {
+    id?: string;
+    task_id?: string;
+    status?: string;
+    state?: string;
+    task_status?: string;
+    error?: { message?: string } | string | null;
+    image_url?: string;
+    url?: string;
+    output?: unknown;
+    result?: unknown;
+    metadata?: { result_urls?: string[]; image_url?: string; url?: string };
+};
+type AsyncImageApiResponse = AsyncImageTaskResponse | { code?: number; data?: AsyncImageTaskResponse | null; msg?: string };
 type GeminiPart = {
     text?: string;
     inlineData?: { mimeType?: string; data?: string };
@@ -113,6 +127,8 @@ const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
 const IMAGE_GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
+const ASYNC_IMAGE_POLL_INTERVAL_MS = 5000;
+const ASYNC_IMAGE_GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -619,30 +635,10 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, prompt),
-                n,
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
-            },
-            {
-                headers: aiHeaders(requestConfig, "application/json"),
-                signal: options?.signal,
-                timeout: IMAGE_GENERATION_TIMEOUT_MS,
-            },
-        );
-        const images = parseImagePayload(response.data);
-        return images;
+        return await requestAsyncImages(requestConfig, withSystemPrompt(requestConfig, prompt), [], n, normalizeQuality(config.quality), options);
     } catch (error) {
-        throw new Error(readAxiosError(error, "请求失败"));
+        throw new Error(readAxiosError(error, "Image generation failed"));
     }
 }
 
@@ -658,32 +654,160 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
             throw new Error(readAxiosError(error, "请求失败"));
         }
     }
-    const quality = normalizeQuality(config.quality);
-    const requestSize = resolveRequestSize(quality, config.size);
-    const images = await Promise.all(references.map((image) => resolveReferenceImageUrl(requestConfig, image, options)));
-    const maskImage = mask ? await resolveReferenceImageUrl(requestConfig, mask, options) : undefined;
 
     try {
-        const response = await axios.post<ImageApiResponse>(
-            aiApiUrl(requestConfig, "/images/generations"),
-            {
-                model: requestConfig.model,
-                prompt: withSystemPrompt(requestConfig, requestPrompt),
-                n,
-                images,
-                ...(maskImage ? { mask: maskImage } : {}),
-                ...(quality ? { quality } : {}),
-                ...(requestSize ? { size: requestSize } : {}),
-                response_format: "b64_json",
-                output_format: IMAGE_OUTPUT_FORMAT,
-            },
-            { headers: aiHeaders(requestConfig, "application/json"), signal: options?.signal, timeout: IMAGE_GENERATION_TIMEOUT_MS },
-        );
-        const generatedImages = parseImagePayload(response.data);
-        return generatedImages;
+        const images = await Promise.all(references.slice(0, 7).map((image) => resolveReferenceImageUrl(requestConfig, image, options)));
+        if (mask && images.length < 7) images.push(await resolveReferenceImageUrl(requestConfig, mask, options));
+        return await requestAsyncImages(requestConfig, withSystemPrompt(requestConfig, requestPrompt), images, n, normalizeQuality(config.quality), options);
     } catch (error) {
-        throw new Error(readAxiosError(error, "请求失败"));
+        throw new Error(readAxiosError(error, "Image edit failed"));
     }
+}
+
+async function requestAsyncImages(config: AiConfig, prompt: string, images: string[], count: number, quality?: string, options?: RequestOptions) {
+    const tasks = await Promise.all(Array.from({ length: count }, () => createAsyncImageTask(config, prompt, images, quality, options)));
+    return Promise.all(tasks.map((taskId) => pollAsyncImageTask(config, taskId, options)));
+}
+
+async function createAsyncImageTask(config: AiConfig, prompt: string, images: string[], quality?: string, options?: RequestOptions) {
+    const payload = buildAsyncImagePayload(config, prompt, images, quality);
+    const created = unwrapAsyncImageResponse((await axios.post<AsyncImageApiResponse>(aiApiUrl(config, "/videos"), payload, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+    const id = created.id || created.task_id;
+    if (!id) throw new Error("Image task id is missing");
+    return id;
+}
+
+async function pollAsyncImageTask(config: AiConfig, taskId: string, options?: RequestOptions) {
+    const startedAt = Date.now();
+    for (;;) {
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const state = unwrapAsyncImageResponse((await axios.get<AsyncImageApiResponse>(aiApiUrl(config, `/videos/${encodeURIComponent(taskId)}`), { headers: aiHeaders(config), signal: options?.signal })).data);
+        const imageUrl = extractAsyncImageUrl(state);
+        if (imageUrl) return { id: nanoid(), dataUrl: imageUrl };
+        const status = (state.status || state.state || state.task_status || "").toLowerCase();
+        if (["completed", "succeeded", "success", "done"].includes(status)) throw new Error("Image task completed without image_url");
+        if (["failed", "cancelled", "canceled", "expired", "error"].includes(status)) throw new Error(readAsyncTaskError(state.error) || "Image generation failed");
+        if (Date.now() - startedAt >= ASYNC_IMAGE_GENERATION_TIMEOUT_MS) throw new Error("Image generation timed out");
+        await delay(ASYNC_IMAGE_POLL_INTERVAL_MS, options?.signal);
+    }
+}
+
+function buildAsyncImagePayload(config: AiConfig, prompt: string, images: string[], quality?: string) {
+    const model = resolveAsyncImageModel(config.model, quality);
+    const payload: Record<string, unknown> = {
+        model,
+        prompt,
+        seconds: 4,
+    };
+    const aspectRatio = resolveAsyncImageAspectRatio(config.size);
+    if (aspectRatio) payload.aspect_ratio = aspectRatio;
+    if (images.length) payload.images = images.slice(0, 7);
+    const resolution = resolveAsyncImageResolution(model, quality);
+    if (resolution) payload.resolution = resolution;
+    return payload;
+}
+
+function resolveAsyncImageModel(model: string, quality?: string) {
+    const value = model.replace(/_sync$/i, "").trim();
+    const lower = value.toLowerCase();
+    const resolution = qualityToResolution(quality);
+    if (lower === "gpt-image-2" || lower === "gpt-image2") return `gpt-image2-${resolution}`;
+    if (lower.startsWith("gpt-image2-")) return value;
+    if ((lower === "nana-banana-2" || lower === "nana-banana-pro") && resolution === "4k") return `${value}-4k`;
+    return value;
+}
+
+function resolveAsyncImageResolution(model: string, quality?: string) {
+    const lower = model.toLowerCase();
+    if (lower.includes("nana-banana")) {
+        if (lower.endsWith("-4k")) return "4k";
+        const resolution = qualityToResolution(quality);
+        return resolution === "4k" ? "2k" : resolution;
+    }
+    return undefined;
+}
+
+function qualityToResolution(quality?: string) {
+    if (quality === "medium" || quality === "hd") return "2k";
+    if (quality === "high") return "4k";
+    return "1k";
+}
+
+function resolveAsyncImageAspectRatio(size: string) {
+    const value = size.trim();
+    if (!value || value.toLowerCase() === "auto") return undefined;
+    const dimensions = parseImageDimensions(value);
+    if (dimensions) return normalizeAspectRatio(dimensions.width, dimensions.height);
+    if (value.includes(":")) {
+        const ratio = parseImageRatio(value);
+        return normalizeAspectRatio(ratio.width, ratio.height);
+    }
+    return undefined;
+}
+
+function normalizeAspectRatio(width: number, height: number) {
+    if (!width || !height) return undefined;
+    const divisor = gcd(width, height);
+    return `${width / divisor}:${height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+    return b ? gcd(b, a % b) : Math.abs(a);
+}
+
+function unwrapAsyncImageResponse(payload: AsyncImageApiResponse) {
+    if (!payload) throw new Error("Image task response is empty");
+    if (typeof payload === "object" && "code" in payload && typeof payload.code === "number") {
+        if (payload.code !== 0) throw new Error(payload.msg || "Request failed");
+        if (!payload.data) throw new Error("Image task response is empty");
+        return payload.data;
+    }
+    return payload as AsyncImageTaskResponse;
+}
+
+function extractAsyncImageUrl(task: AsyncImageTaskResponse) {
+    return firstImageUrl([task.image_url, task.url, task.metadata?.image_url, task.metadata?.url, task.metadata?.result_urls, task.output, task.result]);
+}
+
+function firstImageUrl(values: unknown[]): string | null {
+    for (const value of values) {
+        const url = imageUrlFromValue(value);
+        if (url) return url;
+    }
+    return null;
+}
+
+function imageUrlFromValue(value: unknown): string | null {
+    if (typeof value === "string") return value ? value : null;
+    if (Array.isArray(value)) return firstImageUrl(value);
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return firstImageUrl([record.image_url, record.url, record.result_url, record.result_urls]);
+    }
+    return null;
+}
+
+function readAsyncTaskError(error: AsyncImageTaskResponse["error"]) {
+    if (!error) return "";
+    return typeof error === "string" ? error : error.message || "";
+}
+
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
