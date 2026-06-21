@@ -40,6 +40,8 @@ const NEWTOKEN_FIXED_SECONDS: Record<string, number> = {
     "veo-omni-flash": 10,
     "veo-omni-flash-video-edit": 10,
 };
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const VIDEO_GENERATION_TIMEOUT_MS = 60 * 60 * 1000;
 
 function aiApiUrl(config: AiConfig, path: string) {
     return buildApiUrl(config.baseUrl, path);
@@ -54,16 +56,15 @@ function aiHeaders(config: AiConfig, contentType?: string) {
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
     const task = await createVideoGenerationTask(config, prompt, references, videoReferences, audioReferences, options);
-    const delayMs = task.provider === "seedance" || task.provider === "newtoken" ? 5000 : 2500;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    const startedAt = Date.now();
+    for (;;) {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const state = await pollVideoGenerationTask(config, task, options);
         if (state.status === "completed") return state.result;
         if (state.status === "failed") throw new Error(state.error);
-        if (attempt === 119) throw new Error(`${task.provider === "seedance" ? "Seedance " : task.provider === "newtoken" ? "NewToken " : ""}video generation timed out`);
-        await delay(delayMs, options?.signal);
+        if (Date.now() - startedAt >= VIDEO_GENERATION_TIMEOUT_MS) throw new Error(`${task.provider === "seedance" ? "Seedance " : task.provider === "newtoken" ? "NewToken " : ""}video generation timed out`);
+        await delay(VIDEO_POLL_INTERVAL_MS, options?.signal);
     }
-    throw new Error("Video generation timed out");
 }
 
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationTask> {
