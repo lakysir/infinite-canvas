@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download,
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
 import localforage from "localforage";
+import { cloudStorage, saveToCloud } from "@/services/api/cloud-storage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 
@@ -106,7 +107,7 @@ export default function VideoPage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs();
+        void refreshLogs().then(mergeLogsFromCloud).then(refreshLogs);
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
@@ -258,6 +259,7 @@ export default function VideoPage() {
             .filter((log) => selectedLogIds.includes(log.id))
             .map((log) => log.video?.storageKey)
             .filter((key): key is string => Boolean(key));
+        selectedLogIds.forEach((id) => saveToCloud(() => cloudStorage.deleteLog(id)));
         void Promise.all([deleteStoredMedia(mediaKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
@@ -270,6 +272,7 @@ export default function VideoPage() {
     const saveLog = async (log: GenerationLog) => {
         await logStore.setItem(log.id, serializeLog(log));
         await refreshLogs();
+        saveToCloud(() => cloudStorage.saveLogs("video", [serializeLog(log)]));
     };
 
     const refreshLogs = async () => {
@@ -666,6 +669,23 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
             </div>
         </button>
     );
+}
+
+async function mergeLogsFromCloud() {
+    try {
+        const localIds = new Set<string>();
+        await logStore.iterate<GenerationLog, void>((v) => { localIds.add(v.id); });
+        let page = 1;
+        while (true) {
+            const { logs: remote } = await cloudStorage.getLogs("video", page, 50);
+            if (!remote?.length) break;
+            await Promise.all((remote as GenerationLog[]).filter((l) => !localIds.has(l.id)).map((l) => logStore.setItem(l.id, l)));
+            if ((remote as unknown[]).length < 50) break;
+            page++;
+        }
+    } catch {
+        // fail silently
+    }
 }
 
 async function readStoredLogs() {

@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download,
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import localforage from "localforage";
+import { cloudStorage, saveToCloud } from "@/services/api/cloud-storage";
 import { saveAs } from "file-saver";
 
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
@@ -102,7 +103,7 @@ export default function ImagePage() {
     }, [running, startedAt]);
 
     useEffect(() => {
-        void refreshLogs();
+        void refreshLogs().then(mergeLogsFromCloud).then(refreshLogs);
     }, []);
 
     const addReferences = async (files?: FileList | null) => {
@@ -241,6 +242,7 @@ export default function ImagePage() {
 
     const deleteSelectedLogs = () => {
         const imageKeys = logs.filter((log) => selectedLogIds.includes(log.id)).flatMap((log) => log.images.map((image) => image.storageKey).filter((key): key is string => Boolean(key)));
+        selectedLogIds.forEach((id) => saveToCloud(() => cloudStorage.deleteLog(id)));
         void Promise.all([deleteStoredImages(imageKeys), ...selectedLogIds.map((id) => logStore.removeItem(id))]).then(refreshLogs);
         if (previewLog && selectedLogIds.includes(previewLog.id)) {
             setPreviewLog(null);
@@ -252,6 +254,7 @@ export default function ImagePage() {
 
     const saveLog = (log: GenerationLog) => {
         void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+        saveToCloud(() => cloudStorage.saveLogs("image", [serializeLog(log)]));
     };
 
     const refreshLogs = async () => setLogs(await readStoredLogs());
@@ -684,6 +687,23 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
             </div>
         </button>
     );
+}
+
+async function mergeLogsFromCloud() {
+    try {
+        const localIds = new Set<string>();
+        await logStore.iterate<GenerationLog, void>((v) => { localIds.add(v.id); });
+        let page = 1;
+        while (true) {
+            const { logs: remote } = await cloudStorage.getLogs("image", page, 50);
+            if (!remote?.length) break;
+            await Promise.all((remote as GenerationLog[]).filter((l) => !localIds.has(l.id)).map((l) => logStore.setItem(l.id, l)));
+            if ((remote as unknown[]).length < 50) break;
+            page++;
+        }
+    } catch {
+        // fail silently
+    }
 }
 
 async function readStoredLogs() {

@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
+import { cloudStorage, saveToCloud } from "@/services/api/cloud-storage";
 
 export type CanvasProject = {
     id: string;
@@ -35,8 +36,53 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const CANVAS_STORE_KEY = "infinite-canvas:canvas_store";
 type PersistedCanvasState = Pick<CanvasStore, "projects">;
+
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedPersistState: PersistedCanvasState | null = null;
+let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingCloudProjects: CanvasProject[] | null = null;
+
+function scheduleCloudSave(projects: CanvasProject[]) {
+    pendingCloudProjects = projects;
+    if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = setTimeout(() => {
+        cloudSaveTimer = null;
+        const toSave = pendingCloudProjects;
+        pendingCloudProjects = null;
+        if (toSave?.length) saveToCloud(() => cloudStorage.batchSaveProjects(toSave));
+    }, 1500);
+}
+
+function mergeProjects(local: CanvasProject[], remote: CanvasProject[]): CanvasProject[] {
+    const map = new Map(local.map((p) => [p.id, p]));
+    for (const r of remote) {
+        const l = map.get(r.id);
+        if (!l || new Date(r.updatedAt).getTime() >= new Date(l.updatedAt).getTime()) map.set(r.id, r);
+    }
+    return Array.from(map.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+async function mergeWithCloud() {
+    try {
+        const { projects: remoteList } = await cloudStorage.listProjects();
+        if (!remoteList?.length) return;
+        const localProjects = useCanvasStore.getState().projects;
+        const localMap = new Map(localProjects.map((p) => [p.id, p]));
+        const toFetch = remoteList.filter((r) => {
+            const l = localMap.get(r.id);
+            return !l || new Date(r.updatedAt).getTime() > new Date(l.updatedAt).getTime();
+        });
+        if (!toFetch.length) return;
+        const fetched = (
+            await Promise.all(toFetch.map((r) => cloudStorage.getProject(r.id).then((res) => res.project as CanvasProject).catch(() => null)))
+        ).filter(Boolean) as CanvasProject[];
+        if (!fetched.length) return;
+        const merged = mergeProjects(localProjects, fetched);
+        useCanvasStore.getState().replaceProjects(merged);
+    } catch {
+        // fail silently — cloud sync is best-effort
+    }
+}
 
 const canvasStorage: PersistStorage<CanvasStore> = {
     getItem: async (name) => {
@@ -55,6 +101,7 @@ const canvasStorage: PersistStorage<CanvasStore> = {
             saveTimer = null;
             void localForageStorage.setItem(name, JSON.stringify(value));
         }, 400);
+        scheduleCloudSave(nextState.projects);
     },
     removeItem: (name) => localForageStorage.removeItem(name),
 };
@@ -101,33 +148,28 @@ export const useCanvasStore = create<CanvasStore>()(
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return project.id;
             },
-            openProject: (id) => {
-                return get().projects.find((item) => item.id === id) || null;
-            },
+            openProject: (id) => get().projects.find((item) => item.id === id) || null,
             renameProject: (id, title) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((p) => (p.id === id ? { ...p, title: title.trim() || p.title, updatedAt: new Date().toISOString() } : p)),
                 })),
-            deleteProjects: (ids) =>
-                set((state) => {
-                    const projects = state.projects.filter((project) => !ids.includes(project.id));
-                    return { projects };
-                }),
+            deleteProjects: (ids) => {
+                ids.forEach((id) => saveToCloud(() => cloudStorage.deleteProject(id)));
+                set((state) => ({ projects: state.projects.filter((p) => !ids.includes(p.id)) }));
+            },
             replaceProjects: (projects) => set({ projects }),
             updateProject: (id, patch) =>
                 set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
+                    projects: state.projects.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p)),
                 })),
         }),
         {
             name: CANVAS_STORE_KEY,
             storage: canvasStorage,
-            partialize: (state) =>
-                ({
-                    projects: state.projects,
-                }) as StorageValue<CanvasStore>["state"],
+            partialize: (state) => ({ projects: state.projects }) as StorageValue<CanvasStore>["state"],
             onRehydrateStorage: () => () => {
                 useCanvasStore.setState({ hydrated: true });
+                void mergeWithCloud();
             },
         },
     ),

@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
+import { cloudStorage, saveToCloud } from "@/services/api/cloud-storage";
 
 export type AssetKind = "text" | "image" | "video";
 export type TextAsset = AssetBase<"text"> & { data: { content: string } };
@@ -65,6 +66,23 @@ const assetStorage: PersistStorage<AssetStore> = {
     removeItem: (name) => localForageStorage.removeItem(name),
 };
 
+async function mergeWithCloud() {
+    try {
+        const { assets: remote } = await cloudStorage.getAssets();
+        if (!remote?.length) return;
+        const local = useAssetStore.getState().assets;
+        const map = new Map(local.map((a) => [a.id, a]));
+        for (const r of remote as Asset[]) {
+            const l = map.get(r.id);
+            if (!l || new Date(r.updatedAt).getTime() >= new Date(l.updatedAt).getTime()) map.set(r.id, r);
+        }
+        const merged = Array.from(map.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        useAssetStore.getState().replaceAssets(merged);
+    } catch {
+        // fail silently
+    }
+}
+
 export const useAssetStore = create<AssetStore>()(
     persist(
         (set, get) => ({
@@ -73,19 +91,26 @@ export const useAssetStore = create<AssetStore>()(
             addAsset: (asset) => {
                 const now = new Date().toISOString();
                 const id = nanoid();
-                set((state) => ({ assets: [{ ...asset, id, createdAt: now, updatedAt: now } as Asset, ...state.assets] }));
+                const newAsset = { ...asset, id, createdAt: now, updatedAt: now } as Asset;
+                set((state) => ({ assets: [newAsset, ...state.assets] }));
+                saveToCloud(() => cloudStorage.batchSaveAssets([newAsset]));
                 return id;
             },
-            updateAsset: (id, patch) =>
+            updateAsset: (id, patch) => {
                 set((state) => ({
                     assets: state.assets.map((asset) => (asset.id === id ? ({ ...asset, ...patch, updatedAt: new Date().toISOString() } as Asset) : asset)),
-                })),
-            removeAsset: (id) =>
+                }));
+                const updated = useAssetStore.getState().assets.find((a) => a.id === id);
+                if (updated) saveToCloud(() => cloudStorage.batchSaveAssets([updated]));
+            },
+            removeAsset: (id) => {
+                saveToCloud(() => cloudStorage.deleteAsset(id));
                 set((state) => {
                     const assets = state.assets.filter((asset) => asset.id !== id);
                     get().cleanupImages({ assets });
                     return { assets };
-                }),
+                });
+            },
             replaceAssets: (assets) => set({ assets }),
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
@@ -101,6 +126,7 @@ export const useAssetStore = create<AssetStore>()(
             partialize: (state) => ({ assets: state.assets }) as StorageValue<AssetStore>["state"],
             onRehydrateStorage: () => () => {
                 useAssetStore.setState({ hydrated: true });
+                void mergeWithCloud();
             },
         },
     ),
