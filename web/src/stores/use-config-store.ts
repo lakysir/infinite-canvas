@@ -73,6 +73,7 @@ function scheduleConfigCloudSave() {
         const config = useConfigStore.getState().config;
         const apiKey = config.mirrmartApiKey.trim();
         if (!apiKey) return;
+        if (!config.channels.some((ch) => ch.apiKey.trim())) return;
         void fetch(`${MIRRMART_BASE}/v1/user/config`, {
             method: "PUT",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
