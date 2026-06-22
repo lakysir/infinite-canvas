@@ -9,7 +9,8 @@ import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { cloudStorage } from "@/services/api/cloud-storage";
+import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, syncConfigFromCloud, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -61,6 +62,8 @@ export function AppConfigModal() {
     const { message } = App.useApp();
     const [activeTab, setActiveTab] = useState("channels");
     const [loadingChannelId, setLoadingChannelId] = useState("");
+    const [savingCloud, setSavingCloud] = useState(false);
+    const [syncingCloud, setSyncingCloud] = useState(false);
     const [testingWebdav, setTestingWebdav] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
@@ -75,6 +78,34 @@ export function AppConfigModal() {
     const clearPromptContinue = useConfigStore((state) => state.clearPromptContinue);
     const modelOptions = config.models.map((model) => ({ label: modelOptionLabel(config, model), value: model }));
     const webdavReady = Boolean(webdav.url.trim());
+
+    const saveConfigToCloud = async () => {
+        if (!config.mirrmartApiKey.trim()) {
+            message.error("请先填写 Mirrmart API Key");
+            return;
+        }
+        setSavingCloud(true);
+        try {
+            await cloudStorage.saveConfig(config);
+            message.success("配置已保存到云端");
+        } catch {
+            message.error("保存失败，请检查 Mirrmart API Key");
+        } finally {
+            setSavingCloud(false);
+        }
+    };
+
+    const loadConfigFromCloud = async () => {
+        setSyncingCloud(true);
+        try {
+            await syncConfigFromCloud();
+            message.success("配置已从云端同步");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "同步失败");
+        } finally {
+            setSyncingCloud(false);
+        }
+    };
 
     const saveConfig = (nextConfig: AiConfig) => {
         (Object.keys(nextConfig) as Array<keyof AiConfig>).forEach((key) => updateConfig(key, nextConfig[key]));
@@ -221,9 +252,14 @@ export function AppConfigModal() {
             onCancel={() => setConfigDialogOpen(false)}
             styles={{ body: { maxHeight: "72vh", overflowY: "auto", paddingRight: 12 } }}
             footer={
-                <Button type="primary" onClick={finishConfig}>
-                    完成
-                </Button>
+                <div className="flex items-center justify-between gap-2">
+                    <Button icon={<Cloud className="size-4" />} loading={savingCloud} onClick={() => void saveConfigToCloud()}>
+                        保存到云端
+                    </Button>
+                    <Button type="primary" onClick={finishConfig}>
+                        完成
+                    </Button>
+                </div>
             }
         >
             <Tabs
@@ -418,6 +454,9 @@ export function AppConfigModal() {
                                     <div className="mt-4 flex flex-wrap items-center gap-2">
                                         <Button icon={<Wifi className="size-4" />} disabled={!webdavReady || syncingWebdav} loading={testingWebdav} onClick={() => void testWebdav()}>
                                             测试连接
+                                        </Button>
+                                        <Button loading={syncingCloud} onClick={() => void loadConfigFromCloud()}>
+                                            同步配置
                                         </Button>
                                         {webdavSyncStatus ? <span className="text-xs text-stone-500">{webdavSyncStatus}</span> : null}
                                     </div>

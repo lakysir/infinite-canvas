@@ -237,9 +237,6 @@ export const useConfigStore = create<ConfigStore>()(
             updateConfig: (key, value) => {
                 set((state) => ({ config: { ...state.config, [key]: value } }));
                 scheduleConfigCloudSave();
-                if (key === "mirrmartApiKey" && typeof value === "string" && value.trim()) {
-                    void mergeConfigFromCloud(value.trim());
-                }
             },
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
@@ -432,6 +429,12 @@ function uniqueRawModels(models: string[]) {
 
 function uniqueModelOptions(models: string[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)));
+}
+
+export async function syncConfigFromCloud() {
+    const apiKey = useConfigStore.getState().config.mirrmartApiKey.trim();
+    if (!apiKey) throw new Error("请先填写 Mirrmart API Key");
+    return mergeConfigFromCloud(apiKey);
 }
 
 export function buildApiUrl(baseUrl: string, path: string) {
