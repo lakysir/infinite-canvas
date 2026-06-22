@@ -66,10 +66,11 @@ const MIRRMART_BASE = "https://www.aimh8.com/agent/openapi/fpbrowser2api";
 
 let configCloudTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleConfigCloudSave(config: AiConfig) {
+function scheduleConfigCloudSave() {
     if (configCloudTimer) clearTimeout(configCloudTimer);
     configCloudTimer = setTimeout(() => {
         configCloudTimer = null;
+        const config = useConfigStore.getState().config;
         const apiKey = config.mirrmartApiKey.trim();
         if (!apiKey) return;
         void fetch(`${MIRRMART_BASE}/v1/config`, {
@@ -235,8 +236,7 @@ export const useConfigStore = create<ConfigStore>()(
             shouldPromptContinue: false,
             updateConfig: (key, value) => {
                 set((state) => ({ config: { ...state.config, [key]: value } }));
-                const config = useConfigStore.getState().config;
-                scheduleConfigCloudSave(config);
+                scheduleConfigCloudSave();
                 if (key === "mirrmartApiKey" && typeof value === "string" && value.trim()) {
                     void mergeConfigFromCloud(value.trim());
                 }
