@@ -60,8 +60,8 @@ export type WebdavSyncConfig = {
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
-const OPENAI_BASE_URL = "https://api.newtoken.club";
-const GEMINI_BASE_URL = "https://api.newtoken.club";
+const OPENAI_BASE_URL = "https://api.newplay.la";
+const GEMINI_BASE_URL = "https://api.newplay.la";
 const MIRRMART_BASE = "https://www.aimh8.com/agent/openapi/fpbrowser2api";
 
 let configCloudTimer: ReturnType<typeof setTimeout> | null = null;
