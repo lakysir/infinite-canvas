@@ -1,16 +1,16 @@
 "use client";
 
 import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Tabs } from "antd";
-import { CircleAlert, Cloud, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { CircleAlert, Cloud, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ModelPicker } from "@/components/model-picker";
 import { fetchChannelModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
-import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
+import { WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
 import { cloudStorage } from "@/services/api/cloud-storage";
-import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, syncConfigFromCloud, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { createModelChannel, defaultBaseUrlForApiFormat, filterModelsByCapability, modelOptionLabel, modelOptionsFromChannels, normalizeModelOptionValue, useConfigStore, type AiConfig, type ApiCallFormat, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -63,8 +63,6 @@ export function AppConfigModal() {
     const [activeTab, setActiveTab] = useState("channels");
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [savingCloud, setSavingCloud] = useState(false);
-    const [syncingCloud, setSyncingCloud] = useState(false);
-    const [testingWebdav, setTestingWebdav] = useState(false);
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
@@ -92,18 +90,6 @@ export function AppConfigModal() {
             message.error("保存失败，请检查 Mirrmart API Key");
         } finally {
             setSavingCloud(false);
-        }
-    };
-
-    const loadConfigFromCloud = async () => {
-        setSyncingCloud(true);
-        try {
-            await syncConfigFromCloud();
-            message.success("配置已从云端同步");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "同步失败");
-        } finally {
-            setSyncingCloud(false);
         }
     };
 
@@ -185,22 +171,6 @@ export function AppConfigModal() {
         const next = uniqueModels(models.map((model) => normalizeModelOptionValue(model, config.channels)).filter(Boolean));
         updateConfig(group.modelsKey, next);
         if (!next.includes(config[group.modelKey])) updateConfig(group.modelKey, next[0] || "");
-    };
-
-    const testWebdav = async () => {
-        if (!webdavReady) {
-            message.error("请先填写 WebDAV 地址");
-            return;
-        }
-        setTestingWebdav(true);
-        try {
-            await testWebdavConnection(webdav);
-            message.success("WebDAV 连接可用");
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "WebDAV 连接测试失败");
-        } finally {
-            setTestingWebdav(false);
-        }
     };
 
     const updateWebdavProgress = (event: AppSyncProgressEvent) => {
@@ -452,12 +422,6 @@ export function AppConfigModal() {
                                         </Form.Item>
                                     </div>
                                     <div className="mt-4 flex flex-wrap items-center gap-2">
-                                        <Button icon={<Wifi className="size-4" />} disabled={!webdavReady || syncingWebdav} loading={testingWebdav} onClick={() => void testWebdav()}>
-                                            测试连接
-                                        </Button>
-                                        <Button loading={syncingCloud} onClick={() => void loadConfigFromCloud()}>
-                                            同步配置
-                                        </Button>
                                         {webdavSyncStatus ? <span className="text-xs text-stone-500">{webdavSyncStatus}</span> : null}
                                     </div>
                                     {syncingWebdav || webdavSyncStatus ? <WebdavProgressGrid progress={webdavDomainProgress} /> : null}
