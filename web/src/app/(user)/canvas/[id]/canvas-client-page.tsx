@@ -1825,7 +1825,7 @@ function InfiniteCanvasPage() {
 
             if (target?.nodeId) {
                 if (isAudioFile(file)) {
-                    const audio = await uploadMediaFile(file, "audio");
+                    const audio: UploadedFile = (await uploadFileToOss(file, "audio")) ?? (await uploadMediaFile(file, "audio"));
                     const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
                     setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Audio, title: file.name, position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 }, width: spec.width, height: spec.height, metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined } } : node)));
                     setSelectedNodeIds(new Set([target.nodeId]));
@@ -1835,7 +1835,7 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (file.type.startsWith("video/")) {
-                    const video = await uploadMediaFile(file, "video");
+                    const video: UploadedFile = (await uploadFileToOss(file, "video")) ?? (await uploadMediaFile(file, "video"));
                     const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) => prev.map((node) => (node.id === target.nodeId ? { ...node, type: CanvasNodeType.Video, title: file.name, position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 }, width: nextSize.width, height: nextSize.height, metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined } } : node)));
                     setSelectedNodeIds(new Set([target.nodeId]));
@@ -1845,7 +1845,7 @@ function InfiniteCanvasPage() {
                     event.target.value = "";
                     return;
                 }
-                const image = await uploadImage(file);
+                const image: UploadedImage = (await uploadFileToOss(file, "image")) ?? (await uploadImage(file));
                 const size = fitNodeSize(image.width, image.height);
                 setNodes((prev) =>
                     prev.map((node) =>
