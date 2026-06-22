@@ -67,6 +67,12 @@ export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()
     return keys;
 }
 
+export function readFileMeta(url: string, mimeType: string): Promise<{ width?: number; height?: number; durationMs?: number }> {
+    if (mimeType.startsWith("video/")) return readVideoMeta(url);
+    if (mimeType.startsWith("audio/")) return readAudioMeta(url);
+    return Promise.resolve({});
+}
+
 function readVideoMeta(url: string) {
     return new Promise<{ width: number; height: number; durationMs?: number }>((resolve) => {
         const video = document.createElement("video");

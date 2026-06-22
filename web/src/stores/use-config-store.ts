@@ -62,6 +62,58 @@ export type ModelCapability = "image" | "video" | "text" | "audio";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.newtoken.club";
 const GEMINI_BASE_URL = "https://api.newtoken.club";
+const MIRRMART_BASE = "https://www.aimh8.com/agent/openapi/fpbrowser2api";
+
+let configCloudTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleConfigCloudSave(config: AiConfig) {
+    if (configCloudTimer) clearTimeout(configCloudTimer);
+    configCloudTimer = setTimeout(() => {
+        configCloudTimer = null;
+        const apiKey = config.mirrmartApiKey.trim();
+        if (!apiKey) return;
+        void fetch(`${MIRRMART_BASE}/v1/config`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ config }),
+        }).catch(() => undefined);
+    }, 1500);
+}
+
+async function mergeConfigFromCloud(mirrmartApiKey: string) {
+    if (!mirrmartApiKey.trim()) return;
+    try {
+        const resp = await fetch(`${MIRRMART_BASE}/v1/config`, {
+            headers: { Authorization: `Bearer ${mirrmartApiKey.trim()}` },
+        });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as { config?: Partial<AiConfig> };
+        if (!data.config) return;
+        const remote = data.config;
+        const current = useConfigStore.getState().config;
+        const merged = { ...current, ...remote, mirrmartApiKey: current.mirrmartApiKey };
+        const channels = normalizeChannels(merged);
+        const models = modelOptionsFromChannels(channels);
+        useConfigStore.setState({
+            config: {
+                ...merged,
+                channelMode: "local",
+                channels,
+                models,
+                imageModel: normalizeModelOptionValue(merged.imageModel, channels),
+                videoModel: normalizeModelOptionValue(merged.videoModel, channels),
+                textModel: normalizeModelOptionValue(merged.textModel, channels),
+                audioModel: normalizeModelOptionValue(merged.audioModel, channels),
+                imageModels: Array.isArray(remote.imageModels) ? normalizeModelList(merged.imageModels, channels) : filterModelsByCapability(models, "image"),
+                videoModels: Array.isArray(remote.videoModels) ? normalizeModelList(merged.videoModels, channels) : filterModelsByCapability(models, "video"),
+                textModels: Array.isArray(remote.textModels) ? normalizeModelList(merged.textModels, channels) : filterModelsByCapability(models, "text"),
+                audioModels: Array.isArray(remote.audioModels) ? normalizeModelList(merged.audioModels, channels) : filterModelsByCapability(models, "audio"),
+            },
+        });
+    } catch {
+        // fail silently
+    }
+}
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -181,13 +233,10 @@ export const useConfigStore = create<ConfigStore>()(
             hydrated: false,
             isConfigOpen: false,
             shouldPromptContinue: false,
-            updateConfig: (key, value) =>
-                set((state) => ({
-                    config: {
-                        ...state.config,
-                        [key]: value,
-                    },
-                })),
+            updateConfig: (key, value) => {
+                set((state) => ({ config: { ...state.config, [key]: value } }));
+                scheduleConfigCloudSave(useConfigStore.getState().config);
+            },
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {
@@ -206,6 +255,7 @@ export const useConfigStore = create<ConfigStore>()(
             partialize: (state) => ({ config: state.config, webdav: state.webdav }),
             onRehydrateStorage: () => (state) => {
                 state?.setHydrated(true);
+                if (state?.config.mirrmartApiKey) void mergeConfigFromCloud(state.config.mirrmartApiKey);
             },
             merge: (persisted, current) => {
                 const persistedState = (persisted || {}) as Partial<ConfigStore>;
