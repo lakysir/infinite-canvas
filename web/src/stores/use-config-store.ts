@@ -235,7 +235,11 @@ export const useConfigStore = create<ConfigStore>()(
             shouldPromptContinue: false,
             updateConfig: (key, value) => {
                 set((state) => ({ config: { ...state.config, [key]: value } }));
-                scheduleConfigCloudSave(useConfigStore.getState().config);
+                const config = useConfigStore.getState().config;
+                scheduleConfigCloudSave(config);
+                if (key === "mirrmartApiKey" && typeof value === "string" && value.trim()) {
+                    void mergeConfigFromCloud(value.trim());
+                }
             },
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
