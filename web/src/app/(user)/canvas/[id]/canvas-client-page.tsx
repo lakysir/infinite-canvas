@@ -1533,6 +1533,32 @@ function InfiniteCanvasPage() {
         saveAs(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : node.type === CanvasNodeType.Audio ? audioExtension(node.metadata.mimeType) : imageExtension(node.metadata.content)}`);
     }, []);
 
+    const uploadNodeToOss = useCallback(
+        async (node: CanvasNodeData) => {
+            const url = node.metadata?.content;
+            if (!url || url.startsWith("https://oss.aimh8.com")) return;
+            const config = useConfigStore.getState().config;
+            if (!config.mirrmartApiKey.trim()) {
+                message.error("请先配置 Mirrmart API Key");
+                return;
+            }
+            const isVideoNode = node.type === CanvasNodeType.Video;
+            const type: "image" | "video" = isVideoNode ? "video" : "image";
+            const hide = message.loading("正在上传云...", 0);
+            try {
+                const blob = await (await fetch(url)).blob();
+                const ossUrl = await uploadReferenceMedia(config, blob, type);
+                setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, metadata: { ...n.metadata, content: ossUrl, storageKey: "" } } : n));
+                message.success("已上传云");
+            } catch (err) {
+                message.error(err instanceof Error ? err.message : "上传失败");
+            } finally {
+                hide();
+            }
+        },
+        [message],
+    );
+
     const saveNodeAsset = useCallback(
         async (node: CanvasNodeData) => {
             if (node.type === CanvasNodeType.Text) {
@@ -2664,6 +2690,7 @@ function InfiniteCanvasPage() {
                     onUpload={(node) => handleUploadRequest(node.id)}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
+                    onUploadToOss={(node) => void uploadNodeToOss(node)}
                     onMaskEdit={(node) => setMaskEditNodeId(node.id)}
                     onCrop={(node) => setCropNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
@@ -3010,6 +3037,16 @@ async function uploadFileToOss(file: File, type: "image" | "video" | "audio") {
 
 async function resolveGeneratedImageAsset(config: AiConfig, dataUrl: string): Promise<UploadedImage> {
     if (/^https?:\/\//i.test(dataUrl)) {
+        if (!dataUrl.startsWith("https://oss.aimh8.com") && config.mirrmartApiKey.trim()) {
+            try {
+                const blob = await (await fetch(dataUrl)).blob();
+                const ossUrl = await uploadReferenceMedia(config, blob, "image");
+                const meta = await readImageMeta(ossUrl).catch(() => ({ width: 0, height: 0, mimeType: blob.type || "image/png" }));
+                return { url: ossUrl, storageKey: "", width: meta.width, height: meta.height, bytes: blob.size, mimeType: blob.type || "image/png" };
+            } catch {
+                // fallback: return original URL
+            }
+        }
         const meta = await readImageMeta(dataUrl).catch(() => ({ width: 0, height: 0, mimeType: "image/png" }));
         return { url: dataUrl, storageKey: "", width: meta.width, height: meta.height, bytes: 0, mimeType: meta.mimeType || "image/png" };
     }
@@ -3027,7 +3064,18 @@ async function resolveGeneratedImageAsset(config: AiConfig, dataUrl: string): Pr
 }
 
 async function resolveGeneratedVideoAsset(config: AiConfig, video: UploadedFile): Promise<UploadedFile> {
-    if (!video.storageKey || !config.mirrmartApiKey.trim()) return video;
+    if (!config.mirrmartApiKey.trim()) return video;
+    if (/^https?:\/\//i.test(video.url) && !video.url.startsWith("https://oss.aimh8.com")) {
+        try {
+            const blob = video.storageKey ? (await getMediaBlob(video.storageKey)) : null;
+            const videoBlob = blob ?? await (await fetch(video.url)).blob();
+            const ossUrl = await uploadReferenceMedia(config, videoBlob, "video");
+            return { ...video, url: ossUrl, storageKey: "" };
+        } catch {
+            return video;
+        }
+    }
+    if (!video.storageKey) return video;
     const blob = await getMediaBlob(video.storageKey);
     if (!blob) return video;
     try {
