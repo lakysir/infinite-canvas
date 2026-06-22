@@ -73,10 +73,10 @@ function scheduleConfigCloudSave() {
         const config = useConfigStore.getState().config;
         const apiKey = config.mirrmartApiKey.trim();
         if (!apiKey) return;
-        void fetch(`${MIRRMART_BASE}/v1/config`, {
-            method: "POST",
+        void fetch(`${MIRRMART_BASE}/v1/user/config`, {
+            method: "PUT",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ config }),
+            body: JSON.stringify(config),
         }).catch(() => undefined);
     }, 1500);
 }
@@ -84,7 +84,7 @@ function scheduleConfigCloudSave() {
 async function mergeConfigFromCloud(mirrmartApiKey: string) {
     if (!mirrmartApiKey.trim()) return;
     try {
-        const resp = await fetch(`${MIRRMART_BASE}/v1/config`, {
+        const resp = await fetch(`${MIRRMART_BASE}/v1/user/config`, {
             headers: { Authorization: `Bearer ${mirrmartApiKey.trim()}` },
         });
         if (!resp.ok) return;

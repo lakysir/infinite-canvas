@@ -33,8 +33,8 @@ export const cloudStorage = {
     batchSaveAssets: (assets: unknown[]) => request("POST", "/v1/assets/batch", { assets }),
     deleteAsset: (id: string) => request("DELETE", `/v1/assets/${encodeURIComponent(id)}`),
 
-    getConfig: () => request<{ config: unknown }>("GET", "/v1/config"),
-    saveConfig: (config: unknown) => request("POST", "/v1/config", { config }),
+    getConfig: () => request<{ config: unknown }>("GET", "/v1/user/config"),
+    saveConfig: (config: unknown) => request("PUT", "/v1/user/config", config),
 };
 
 /** Fire-and-forget cloud save — never throws. */
