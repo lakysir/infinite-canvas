@@ -338,10 +338,8 @@ async function buildNewTokenVideoPayload(config: AiConfig, model: string, prompt
     if (aspectRatio) payload.aspect_ratio = aspectRatio;
     const imageUrls = await Promise.all(references.slice(0, 7).map((image) => resolveNewTokenImageUrl(config, image)));
     if (imageUrls.length) {
-        if (isVeoEdit) {
+        if (isVeo) {
             payload.Ingredients_images = imageUrls;
-        } else if (isVeo) {
-            payload.images = imageUrls;
         } else if (isVideoSeries) {
             payload.image_url = imageUrls[0];
             if (imageUrls.length > 1) payload.extra_images = imageUrls.slice(1);
